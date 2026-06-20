@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>발주서 → 배대지 주문서 변환기</title>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper:#f4f1ea; --ink:#1b1a17; --muted:#6f6a60; --line:#d8d2c4;
+    --card:#fbfaf6; --accent:#c1432a; --accent-dark:#9c331e;
+    --ok:#2f6f4f; --ok-bg:#e6f0e8; --warn:#9a6a12; --warn-bg:#f6edd8;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"Pretendard",system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:var(--sans); background:var(--paper); color:var(--ink);
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+    background-image:
+      linear-gradient(rgba(0,0,0,.018) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(0,0,0,.018) 1px,transparent 1px);
+    background-size:26px 26px;
+    min-height:100vh; padding:0 0 80px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  header.top{
+    border-bottom:2px solid var(--ink); padding:30px 0 18px; margin-bottom:34px;
+    display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;
+  }
+  .brandline{display:flex;align-items:center;gap:13px}
+  .glyph{
+    width:42px;height:42px;border:2px solid var(--ink);border-radius:9px;
+    display:grid;place-items:center;font-family:var(--mono);font-weight:700;
+    font-size:18px;background:var(--accent);color:#fff;flex:none;
+    box-shadow:3px 3px 0 var(--ink);
+  }
+  h1{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.15}
+  h1 small{display:block;font-size:12.5px;font-weight:500;color:var(--muted);letter-spacing:0;margin-top:3px}
+  .org{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;line-height:1.5}
+  .org b{color:var(--ink)}
+
+  .flow{
+    display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;
+    color:var(--muted);margin-bottom:26px;align-items:center;
+  }
+  .flow span{background:var(--card);border:1px solid var(--line);padding:4px 10px;border-radius:20px}
+  .flow .arr{border:none;background:none;color:var(--accent);font-weight:700}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:8px}
+  @media(max-width:760px){.grid3{grid-template-columns:1fr}}
+  .drop{
+    background:var(--card);border:1.5px dashed var(--line);border-radius:14px;
+    padding:20px 18px;cursor:pointer;transition:.16s;position:relative;min-height:142px;
+    display:flex;flex-direction:column;
+  }
+  .drop:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .drop.dragover{border-color:var(--accent);background:#fff;border-style:solid}
+  .drop.loaded{border-style:solid;border-color:var(--ok)}
+  .step{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.04em}
+  .req{color:var(--accent);font-weight:700}
+  .opt{color:var(--muted)}
+  .drop h3{font-size:15.5px;font-weight:700;margin:7px 0 4px}
+  .drop p{font-size:12px;color:var(--muted);flex:1}
+  .filetag{
+    margin-top:10px;font-family:var(--mono);font-size:11.5px;display:none;
+    background:var(--ok-bg);color:var(--ok);padding:7px 10px;border-radius:8px;
+    word-break:break-all;line-height:1.45;
+  }
+  .drop.loaded .filetag{display:block}
+  .drop.loaded .ph{display:none}
+
+  .controls{
+    display:flex;align-items:center;justify-content:space-between;gap:18px;
+    margin:22px 0 6px;flex-wrap:wrap;
+  }
+  .opts{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}
+  .opts input{width:16px;height:16px;accent-color:var(--accent)}
+  button.run{
+    font-family:var(--sans);font-weight:700;font-size:15px;color:#fff;
+    background:var(--accent);border:none;padding:14px 30px;border-radius:11px;
+    cursor:pointer;transition:.15s;box-shadow:3px 3px 0 var(--ink);letter-spacing:-.01em;
+  }
+  button.run:hover:not(:disabled){background:var(--accent-dark);transform:translate(1px,1px);box-shadow:2px 2px 0 var(--ink)}
+  button.run:disabled{background:#c8c2b4;box-shadow:3px 3px 0 #aaa49a;cursor:not-allowed}
+
+  /* 고정 배송·통관 정보 패널 */
+  .fixedpanel{background:var(--card);border:1px solid var(--line);border-radius:13px;margin:20px 0 4px;overflow:hidden}
+  .fphead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;cursor:pointer;background:#f0ece2;border-bottom:1px solid transparent}
+  .fixedpanel.open .fphead{border-bottom-color:var(--line)}
+  .fphead h3{font-size:14px;font-weight:700;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .fphead h3 small{font-size:11.5px;font-weight:500;color:var(--muted)}
+  .fptoggle{font-family:var(--mono);font-size:11.5px;color:var(--accent);background:none;border:none;cursor:pointer;font-weight:700;white-space:nowrap}
+  .fpbody{padding:18px;display:none}
+  .fixedpanel.open .fpbody{display:block}
+  .fpgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 18px}
+  @media(max-width:680px){.fpgrid{grid-template-columns:1fr}}
+  .fpfield{display:flex;flex-direction:column;gap:4px}
+  .fpfield label{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+  .fpfield label .key{color:var(--accent);font-size:10px;font-family:var(--mono);font-weight:700}
+  .fpfield input{font-family:var(--sans);font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  .fpfield input:focus{outline:none;border-color:var(--accent)}
+  .fpfield input::placeholder{color:#bcb6a8;font-size:12px}
+  .fpactions{display:flex;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap}
+  .fpsave,.fpclear{font-family:var(--sans);font-weight:600;font-size:12.5px;padding:8px 16px;border-radius:8px;cursor:pointer;border:1.5px solid var(--ink);background:#fff;color:var(--ink)}
+  .fpsave:hover{background:var(--ink);color:#fff}
+  .fpclear{border-color:var(--line);color:var(--muted)}
+  .fpclear:hover{border-color:var(--accent);color:var(--accent)}
+  .fpnote{font-size:11.5px;color:var(--ok);font-family:var(--mono)}
+
+  .msg{margin-top:14px;font-size:13px;padding:11px 14px;border-radius:9px;display:none}
+  .msg.err{display:block;background:#f7e3df;color:var(--accent-dark);border:1px solid #e3b3a8}
+  .msg.info{display:block;background:var(--warn-bg);color:var(--warn);border:1px solid #e3cf9c}
+
+  .results{display:none;margin-top:30px}
+  .results.show{display:block;animation:fade .4s ease both}
+  @keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:26px}
+  @media(max-width:680px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .stat .n{font-family:var(--mono);font-size:27px;font-weight:700;letter-spacing:-.02em}
+  .stat .l{font-size:12px;color:var(--muted);margin-top:2px}
+  .stat.ok .n{color:var(--ok)} .stat.bad .n{color:var(--accent)}
+  .stat .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:4px}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-bottom:22px}
+  .panel .head{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);background:#f0ece2}
+  .panel .head h3{font-size:14px;font-weight:700}
+  .panel .head .cnt{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .tablewrap{overflow-x:auto;max-height:340px;overflow-y:auto}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+  th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left}
+  th{position:sticky;top:0;background:#f0ece2;font-weight:700;font-size:11px;color:var(--muted);letter-spacing:.03em;z-index:1}
+  td.num{font-family:var(--mono);text-align:right}
+  tr:last-child td{border-bottom:none}
+  .pill{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:20px;background:var(--warn-bg);color:var(--warn);border:1px solid #e3cf9c}
+  .empty{color:var(--muted);font-size:13px;padding:24px;text-align:center}
+
+  .dlbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  button.dl{
+    font-family:var(--sans);font-weight:700;font-size:14.5px;color:var(--ink);
+    background:#fff;border:1.5px solid var(--ink);padding:13px 26px;border-radius:11px;
+    cursor:pointer;transition:.15s;box-shadow:3px 3px 0 var(--ink);
+  }
+  button.dl:hover{background:var(--ink);color:#fff;transform:translate(1px,1px);box-shadow:2px 2px 0 var(--ink)}
+  .dlnote{font-size:12px;color:var(--muted)}
+  footer{margin-top:46px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brandline">
+      <div class="glyph">⇄</div>
+      <h1>발주서 → 배대지 주문서 변환기
+        <small>쿠팡 로켓배송 발주서를 중국 배대지 대량주문서로 자동 변환</small>
+      </h1>
+    </div>
+    <div class="org"><b>스파크AI교육연구소</b><br>AI 기반 업무 자동화</div>
+  </header>
+
+  <div class="flow">
+    <span>① 쿠팡 발주서</span><span class="arr">→</span>
+    <span>② 로켓장부 조회</span><span class="arr">→</span>
+    <span>③ 같은 상품 합산 · 위안 합계</span><span class="arr">→</span>
+    <span>④ 배대지 주문서 · 미매칭 리포트</span>
+  </div>
+
+  <div class="grid3">
+    <div class="drop" id="d-po">
+      <div class="ph">
+        <div class="step">STEP 01 · <span class="req">필수</span></div>
+        <h3>쿠팡 발주서</h3>
+        <p>PO_SKU_LIST 파일 (.csv / .xlsx).<br>클릭 또는 드래그하여 업로드</p>
+      </div>
+      <div class="filetag" id="t-po"></div>
+      <input type="file" id="f-po" accept=".csv,.xlsx,.xls" hidden>
+    </div>
+    <div class="drop" id="d-led">
+      <div class="ph">
+        <div class="step">STEP 02 · <span class="req">필수</span></div>
+        <h3>로켓장부</h3>
+        <p>상품 장부 (.xlsx). SKU·단가(위안)·색상·중국 URL 기준 자료.</p>
+      </div>
+      <div class="filetag" id="t-led"></div>
+      <input type="file" id="f-led" accept=".xlsx,.xls" hidden>
+    </div>
+    <div class="drop" id="d-tpl">
+      <div class="ph">
+        <div class="step">STEP 03 · <span class="opt">권장</span></div>
+        <h3>출력 양식 템플릿</h3>
+        <p>배대지 대량등록 양식 (.xlsx). 헤더와 고정 배송정보를 자동 인식.</p>
+      </div>
+      <div class="filetag" id="t-tpl"></div>
+      <input type="file" id="f-tpl" accept=".xlsx,.xls" hidden>
+    </div>
+  </div>
+
+  <div class="fixedpanel open" id="fixedpanel">
+    <div class="fphead" id="fphead">
+      <h3>고정 배송·통관 정보 <small>모든 주문 행에 동일하게 채워집니다 · 한 번 저장하면 다음에도 유지됩니다</small></h3>
+      <button type="button" class="fptoggle" id="fptoggle">접기 ▴</button>
+    </div>
+    <div class="fpbody">
+      <div class="fpgrid" id="fpgrid"></div>
+      <div class="fpactions">
+        <button type="button" class="fpsave" id="fpsave">저장</button>
+        <button type="button" class="fpclear" id="fpclear">전체 비우기</button>
+        <span class="fpnote" id="fpnote"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="opts">
+      <label><input type="checkbox" id="o-merge" checked> 같은 상품(SKU) 합산</label>
+      <label><input type="checkbox" id="o-fixed" checked> 템플릿 첫 행의 고정값 자동 복사</label>
+    </div>
+    <button class="run" id="run" disabled>변환 실행 →</button>
+  </div>
+  <div class="msg" id="msg"></div>
+
+  <section class="results" id="results">
+    <div class="stats">
+      <div class="stat"><div class="n" id="s-total">0</div><div class="l">고유 SKU</div><div class="sub" id="s-rows"></div></div>
+      <div class="stat ok"><div class="n" id="s-ok">0</div><div class="l">변환 완료</div></div>
+      <div class="stat bad"><div class="n" id="s-bad">0</div><div class="l">미매칭 (장부 보완 필요)</div></div>
+      <div class="stat"><div class="n" id="s-sum">0</div><div class="l">위안 합계 (CNY)</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="head"><h3>신청 시트 미리보기</h3><span class="cnt" id="c-ok"></span></div>
+      <div class="tablewrap" id="prev-ok"></div>
+    </div>
+    <div class="panel">
+      <div class="head"><h3>미매칭 리포트 — 장부에 채워야 할 SKU</h3><span class="cnt" id="c-bad"></span></div>
+      <div class="tablewrap" id="prev-bad"></div>
+    </div>
+
+    <div class="dlbar">
+      <button class="dl" id="dl">결과 엑셀 다운로드 (.xlsx)</button>
+      <span class="dlnote">신청 시트 + 미매칭 리포트 시트 포함 · 노란 영역(배송정보)은 고정값으로 채워집니다.</span>
+    </div>
+  </section>
+
+  <footer>스파크AI교육연구소 · 발주서 자동변환 웹 도구 · 모든 처리는 브라우저 안에서만 이루어집니다 (데이터 외부 전송 없음)</footer>
+</div>
+
+<script>
+const DEFAULT_HEADERS = ["묶음번호","출고여부","수취인(한글)","수취인(영문)","휴대폰 번호","우편번호","수취인 주소","수취인 상세주소","수취인 주소(영문)","수취인 상세주소(영문)","통관구분","개인통관번호 또는 사업자번호","센터 요청사항","국내택배 요청사항","통관품목 번호","쇼핑몰 URL","쇼핑몰 오더번호","상품명","브랜드","색상","사이즈","수량","합계","이미지 URL","상품URL","트래킹번호(중국 운송장번호)","바코드내용"];
+
+const state = { po:null, led:null, tplHeaders:null, tplFixed:null, output:null, fixedInputs:{} };
+const norm = s => String(s==null?"":s).replace(/[\s\n\r]/g,"").toLowerCase();
+const skuKey = v => { if(v==null) return ""; if(typeof v==="number") return String(Math.trunc(v)); let s=String(v).trim(); return s.replace(/\.0+$/,""); };
+const num = v => { const n = Number(String(v==null?"":v).replace(/,/g,"").trim()); return isFinite(n)?n:NaN; };
+
+function readWB(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=e=>{ try{ res(XLSX.read(new Uint8Array(e.target.result),{type:"array"})); }catch(err){ rej(err);} };
+    r.onerror=()=>rej(new Error("파일을 읽을 수 없습니다."));
+    r.readAsArrayBuffer(file);
+  });
+}
+function sheetAOA(wb, preferName){
+  let name = wb.SheetNames[0];
+  if(preferName){ const f = wb.SheetNames.find(n=>n.includes(preferName)); if(f) name=f; }
+  return XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:"", blankrows:false});
+}
+function findCol(headers, test){ for(let i=0;i<headers.length;i++){ if(test(norm(headers[i]))) return i; } return -1; }
+
+// ---- 발주서 파싱 ----
+function parsePO(aoa){
+  if(!aoa.length) throw new Error("발주서가 비어 있습니다.");
+  const h=aoa[0];
+  const cId  = findCol(h,n=>n==="skuid");
+  const cNm  = findCol(h,n=>n==="sku이름"||(n.includes("sku")&&n.includes("이름"))||(n.includes("sku")&&n.includes("명")));
+  const cBc  = findCol(h,n=>n.includes("barcode")||n.includes("바코드"));
+  const cQty = findCol(h,n=>n==="발주수량"||(n.includes("발주")&&n.includes("수량")));
+  if(cId<0) throw new Error("발주서에서 'SKU ID' 열을 찾지 못했습니다.");
+  if(cQty<0) throw new Error("발주서에서 '발주수량' 열을 찾지 못했습니다.");
+  const rows=[];
+  for(let i=1;i<aoa.length;i++){
+    const r=aoa[i]; const sku=skuKey(r[cId]); if(!sku) continue;
+    rows.push({ sku, name:cNm>=0?String(r[cNm]||"").trim():"", barcode:cBc>=0?String(r[cBc]||"").trim():"", qty:(num(r[cQty])||0) });
+  }
+  return rows;
+}
+// ---- 장부 파싱 ----
+function parseLED(aoa){
+  if(!aoa.length) throw new Error("장부가 비어 있습니다.");
+  const h=aoa[0];
+  const cId=findCol(h,n=>n==="skuid");
+  const cNm=findCol(h,n=>n==="상품명");
+  const cBc=findCol(h,n=>n.includes("바코드"));
+  const cCo=findCol(h,n=>n.includes("색상"));
+  const cSz=findCol(h,n=>n.includes("사이즈"));
+  const cDg=findCol(h,n=>n.includes("단가"));
+  const cIm=findCol(h,n=>n.includes("이미지"));
+  const cUrl=findCol(h,n=>n.includes("상품")&&n.includes("url"));
+  if(cId<0) throw new Error("장부에서 'SKU ID' 열을 찾지 못했습니다.");
+  const map=new Map();
+  for(let i=1;i<aoa.length;i++){
+    const r=aoa[i]; const sku=skuKey(r[cId]); if(!sku) continue;
+    map.set(sku,{ name:cNm>=0?String(r[cNm]||"").trim():"", color:cCo>=0?String(r[cCo]||"").trim():"",
+      size:cSz>=0?String(r[cSz]||"").trim():"", danga:cDg>=0?num(r[cDg]):NaN,
+      img:cIm>=0?String(r[cIm]||"").trim():"", url:cUrl>=0?String(r[cUrl]||"").trim():"" });
+  }
+  return map;
+}
+// ---- 템플릿 파싱: 헤더 + 첫 데이터행(고정값) ----
+function parseTPL(aoa){
+  if(!aoa.length) return;
+  state.tplHeaders = aoa[0].map(x=>String(x==null?"":x));
+  state.tplFixed = aoa.length>1 ? aoa[1] : null;
+}
+
+// 헤더 → 상품필드 분류
+function classify(header){
+  const n=norm(header);
+  if(n.includes("묶음")) return "group";
+  if(n.includes("상품명")) return "name";
+  if(n.includes("색상")) return "color";
+  if(n.includes("사이즈")) return "size";
+  if(n==="수량"||(n.includes("수량")&&!n.includes("발주"))) return "qty";
+  if(n.includes("합계")) return "total";
+  if(n.includes("이미지")) return "img";
+  if(n.includes("상품")&&n.includes("url")) return "url";
+  if(n.includes("바코드")) return "barcode";
+  if(n.includes("브랜드")) return "brand";
+  return "fixed";
+}
+
+function convert(){
+  msg("");
+  try{
+    if(!state.po||!state.led){ msg("발주서와 로켓장부를 모두 업로드해 주세요.","err"); return; }
+    const merge=document.getElementById("o-merge").checked;
+    const useFixed=document.getElementById("o-fixed").checked;
+
+    // 같은 상품 합산
+    let units;
+    if(merge){
+      const g=new Map();
+      state.po.forEach(r=>{ const e=g.get(r.sku); if(e){ e.qty+=r.qty; } else { g.set(r.sku,{...r}); } });
+      units=[...g.values()];
+    } else { units=state.po.map(r=>({...r})); }
+
+    const ok=[], bad=[];
+    units.forEach(u=>{
+      const L=state.led.get(u.sku);
+      const hasDg = L && isFinite(L.danga);
+      const hasUrl= L && L.url;
+      const name = (L&&L.name)||u.name;
+      if(L&&hasDg&&hasUrl){
+        ok.push({ sku:u.sku, name, barcode:u.barcode, qty:u.qty, color:L.color, size:L.size,
+          danga:L.danga, total:Math.round(L.danga*u.qty*100)/100, img:L.img, url:L.url });
+      } else {
+        let reason = !L ? "장부에 SKU 없음" : (!hasDg&&!hasUrl)?"단가·상품URL 모두 없음":(!hasDg?"단가 없음":"상품URL 없음");
+        bad.push({ sku:u.sku, name, qty:u.qty, reason, color:L?L.color:"", danga:L?L.danga:"", url:L?L.url:"" });
+      }
+    });
+
+    // 출력 헤더 결정
+    const headers = state.tplHeaders && state.tplHeaders.length ? state.tplHeaders : DEFAULT_HEADERS;
+    const kinds = headers.map(classify);
+    const tplFixed = state.tplFixed;
+
+    // 신청 시트 AOA
+    const aoa=[headers];
+    ok.forEach((r,idx)=>{
+      const row=headers.map((h,ci)=>{
+        switch(kinds[ci]){
+          case "group": return 1;  // 같은 수취인=같은 묶음번호 (배대지 규칙). 첫 행 수취인정보가 묶음 전체 기준
+          case "name": return r.name;
+          case "color": return r.color;
+          case "size": return r.size;
+          case "qty": return r.qty;
+          case "total": return r.total;
+          case "img": return r.img;
+          case "url": return r.url;
+          case "barcode": return r.barcode;
+          case "brand": {
+            const bv=state.fixedInputs[headers[ci]];
+            if(bv!=null&&String(bv).trim()!=="") return bv;
+            return (useFixed&&tplFixed&&tplFixed[ci]!=null&&tplFixed[ci]!=="")?tplFixed[ci]:"taobao";
+          }
+          default: {
+            const fv=state.fixedInputs[headers[ci]];
+            if(fv!=null&&String(fv).trim()!=="") return fv;
+            return (useFixed&&tplFixed&&tplFixed[ci]!=null)?tplFixed[ci]:"";
+          }
+        }
+      });
+      aoa.push(row);
+    });
+
+    // 워크북 생성
+    const wb=XLSX.utils.book_new();
+    const ws1=XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb,ws1,"신청");
+    const badAOA=[["SKU ID","상품명","발주수량","문제","색상","단가(위안)","상품URL"]];
+    bad.forEach(b=>badAOA.push([b.sku,b.name,b.qty,b.reason,b.color,b.danga,b.url]));
+    const ws2=XLSX.utils.aoa_to_sheet(badAOA);
+    XLSX.utils.book_append_sheet(wb,ws2,"미매칭_리포트");
+    state.output=wb;
+
+    renderResults(ok,bad,units.length);
+  }catch(err){ msg("오류: "+err.message,"err"); }
+}
+
+function renderResults(ok,bad,total){
+  const sum=ok.reduce((a,r)=>a+r.total,0);
+  document.getElementById("s-total").textContent=total;
+  document.getElementById("s-rows").textContent="발주 "+state.po.length+"행";
+  document.getElementById("s-ok").textContent=ok.length;
+  document.getElementById("s-bad").textContent=bad.length;
+  document.getElementById("s-sum").textContent=(Math.round(sum*100)/100).toLocaleString();
+  document.getElementById("c-ok").textContent=ok.length+"개 품목";
+  document.getElementById("c-bad").textContent=bad.length+"개 품목";
+
+  // 신청 미리보기
+  const okHead=["#","상품명","색상","사이즈","수량","합계(위안)","상품URL"];
+  let h="<table><thead><tr>"+okHead.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>";
+  if(ok.length===0){ h="<div class='empty'>변환 완료 품목이 없습니다. 장부를 보완한 뒤 다시 시도하세요.</div>"; }
+  else{
+    ok.slice(0,80).forEach((r,i)=>{
+      h+="<tr><td class='num'>"+(i+1)+"</td><td>"+esc(r.name)+"</td><td>"+esc(r.color)+"</td><td>"+esc(r.size)+
+         "</td><td class='num'>"+r.qty+"</td><td class='num'>"+r.total+"</td><td>"+link(r.url)+"</td></tr>";
+    });
+    h+="</tbody></table>";
+    if(ok.length>80) h+="<div class='empty'>… 외 "+(ok.length-80)+"개 (엑셀 다운로드 시 전체 포함)</div>";
+  }
+  document.getElementById("prev-ok").innerHTML=h;
+
+  // 미매칭
+  let b="<table><thead><tr><th>SKU ID</th><th>상품명</th><th>발주수량</th><th>문제</th></tr></thead><tbody>";
+  if(bad.length===0){ b="<div class='empty'>미매칭 품목이 없습니다. 모든 발주 품목이 정상 변환되었습니다. ✓</div>"; }
+  else{
+    bad.forEach(r=>{ b+="<tr><td class='num'>"+esc(r.sku)+"</td><td>"+esc(r.name)+"</td><td class='num'>"+r.qty+"</td><td><span class='pill'>"+esc(r.reason)+"</span></td></tr>"; });
+    b+="</tbody></table>";
+  }
+  document.getElementById("prev-bad").innerHTML=b;
+
+  document.getElementById("results").classList.add("show");
+  document.getElementById("results").scrollIntoView({behavior:"smooth",block:"start"});
+}
+const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const escAttr=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const link=u=>u?"<a href='"+esc(u)+"' target='_blank' style='color:var(--accent)'>"+esc(u.length>40?u.slice(0,40)+"…":u)+"</a>":"";
+
+function msg(t,k){ const m=document.getElementById("msg"); if(!t){m.className="msg";m.textContent="";return;} m.className="msg "+(k||"info"); m.textContent=t; }
+
+// ---- 업로드 바인딩 ----
+function bind(dropId,inputId,tagId,kind){
+  const drop=document.getElementById(dropId), inp=document.getElementById(inputId), tag=document.getElementById(tagId);
+  const handle=async file=>{
+    if(!file) return;
+    try{
+      const wb=await readWB(file);
+      if(kind==="po"){ state.po=parsePO(sheetAOA(wb)); tag.textContent="✓ "+file.name+"  ("+state.po.length+"행)"; }
+      else if(kind==="led"){ state.led=parseLED(sheetAOA(wb,"장부")); tag.textContent="✓ "+file.name+"  ("+state.led.size+"개 SKU)"; }
+      else { parseTPL(sheetAOA(wb)); tag.textContent="✓ "+file.name+"  ("+(state.tplHeaders?state.tplHeaders.length:0)+"열 인식)"; renderFixedPanel(); }
+      drop.classList.add("loaded"); msg(""); refresh();
+    }catch(err){ msg(file.name+" — "+err.message,"err"); drop.classList.remove("loaded"); }
+  };
+  drop.addEventListener("click",()=>inp.click());
+  inp.addEventListener("change",e=>handle(e.target.files[0]));
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("dragover");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("dragover");}));
+  drop.addEventListener("drop",e=>handle(e.dataTransfer.files[0]));
+}
+function refresh(){
+  document.getElementById("run").disabled = !(state.po&&state.led);
+  if(state.po&&state.led&&!state.tplHeaders) msg("출력 양식 템플릿이 없으면 기본 27열 양식으로 출력됩니다. 위 ‘고정 배송·통관 정보’를 입력하면 배송정보 칸이 채워지고, 템플릿을 올리면 헤더·고정값이 자동 반영됩니다.","info");
+}
+bind("d-po","f-po","t-po","po");
+bind("d-led","f-led","t-led","led");
+bind("d-tpl","f-tpl","t-tpl","tpl");
+
+// ---- 고정 배송·통관 정보 패널 ----
+const LS_KEY="baedaeji_fixed_v1";
+function activeHeaders(){ return (state.tplHeaders&&state.tplHeaders.length)?state.tplHeaders:DEFAULT_HEADERS; }
+function loadFixed(){ try{ const s=localStorage.getItem(LS_KEY); if(s){ const o=JSON.parse(s); if(o&&typeof o==="object") state.fixedInputs=o; } }catch(e){} }
+function persistFixed(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state.fixedInputs)); }catch(e){} }
+function fixedImportant(h){ const n=norm(h); return (n.includes("수취인")&&!n.includes("영문")) || n.includes("통관번호") || n.includes("사업자") || (n.includes("주소")&&!n.includes("영문")) || n.includes("휴대폰") || n.includes("우편"); }
+function renderFixedPanel(){
+  const headers=activeHeaders();
+  const grid=document.getElementById("fpgrid");
+  let html="";
+  headers.forEach((h,ci)=>{
+    if(classify(h)!=="fixed") return;
+    const v = state.fixedInputs[h]!=null ? state.fixedInputs[h] : "";
+    const tplv = (state.tplFixed && state.tplFixed[ci]!=null) ? String(state.tplFixed[ci]).trim() : "";
+    const ph = tplv ? ("템플릿값: "+tplv) : "비워두면 빈 칸으로 출력";
+    const tag = fixedImportant(h) ? "<span class='key'>● 권장</span>" : "";
+    html+="<div class='fpfield'><label>"+esc(h)+tag+"</label>"+
+          "<input type='text' data-key=\""+escAttr(h)+"\" value=\""+escAttr(v)+"\" placeholder=\""+escAttr(ph)+"\"></div>";
+  });
+  if(!html) html="<div class='empty'>이 양식에는 고정값 칸이 없습니다.</div>";
+  grid.innerHTML=html;
+  grid.querySelectorAll("input").forEach(inp=>{
+    inp.addEventListener("input",e=>{
+      state.fixedInputs[e.target.getAttribute("data-key")]=e.target.value;
+      persistFixed();
+      document.getElementById("fpnote").textContent="";
+    });
+  });
+}
+document.getElementById("fphead").addEventListener("click",()=>{
+  const p=document.getElementById("fixedpanel"); p.classList.toggle("open");
+  document.getElementById("fptoggle").textContent = p.classList.contains("open")?"접기 ▴":"펼치기 ▾";
+});
+document.getElementById("fpsave").addEventListener("click",e=>{
+  e.stopPropagation(); persistFixed();
+  document.getElementById("fpnote").textContent="저장됨 ✓ — 다음에 열어도 그대로 채워집니다";
+});
+document.getElementById("fpclear").addEventListener("click",e=>{
+  e.stopPropagation(); state.fixedInputs={}; persistFixed(); renderFixedPanel();
+  document.getElementById("fpnote").textContent="모두 비웠습니다";
+});
+loadFixed();
+renderFixedPanel();
+
+document.getElementById("run").addEventListener("click",convert);
+document.getElementById("dl").addEventListener("click",()=>{
+  if(!state.output){ msg("먼저 변환을 실행하세요.","err"); return; }
+  const d=new Date(), p=n=>String(n).padStart(2,"0");
+  XLSX.writeFile(state.output,"배대지_대량주문서_"+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+".xlsx");
+});
+</script>
+</body>
+</html>

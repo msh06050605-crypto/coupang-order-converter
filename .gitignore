@@ -1,0 +1,11 @@
+# 실제 발주/장부 데이터는 올리지 않음 (개인정보 보호)
+*.csv
+*.xlsx
+*.xls
+*.zip
+
+# OS / 에디터
+desktop.ini
+.DS_Store
+Thumbs.db
+.vscode/
